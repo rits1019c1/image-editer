@@ -1,34 +1,55 @@
-# image-editor
+# ✦ Image Editor
 
-An Electron application with React and TypeScript
+モダンなデザインとAI機能を備えた、高機能デスクトップ画像エディタです。
 
-## Recommended IDE Setup
+## ✨ 主な機能
 
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+- **AI 背景削除**: ワンクリックで画像の背景を透過させます（右クリックメニューまたはプロパティパネル）。
+- **🌀 渦巻きフィルター**: 画像にダイナミックな渦巻き効果を適用。中心点や回転数、半径を自由に調整可能。
+- **安定したテキスト編集**: キャンバス上のテキストをダブルクリックして直感的に編集。フォント、色、スタイル（太字/斜体）もカスタマイズ。
+- **高度な操作**:
+  - **ズーム**: `Ctrl + ホイール` で拡大縮小（下部にコントロールUIあり）。
+  - **パン**: `Space + ドラッグ` でキャンバスを自由自在に移動。
+- **Windows/Mac 対応**: 各OSに最適化されたタイトルバーとショートカットキー。
+- **エクスポート**: 背景透過での保存や、クリップボードへの直接コピーに対応。
 
-## Project Setup
+## ⌨️ ショートカットキー
 
-### Install
+| 操作 | Mac | Windows |
+| --- | --- | --- |
+| **元に戻す** | `⌘ Z` | `Ctrl + Z` |
+| **やり直す** | `⌘ ⇧ Z` | `Ctrl + ⇧ Z` (または `Ctrl+Y`) |
+| **コピー** | `⌘ C` | `Ctrl + C` |
+| **カット** | `⌘ X` | `Ctrl + X` |
+| **ペースト** | `⌘ V` | `Ctrl + V` |
+| **画像ペースト** | `⌘ ⇧ V` | `Ctrl + ⇧ V` |
+| **全選択** | `⌘ A` | `Ctrl + A` |
+| **削除** | `Del` / `BS` | `Del` / `BS` |
+| **ズーム** | `Ctrl + Wheel` | `Ctrl + Wheel` |
+| **パン (移動)** | `Space + Drag` | `Space + Drag` |
+| **テキスト確定** | `Ctrl + Enter` | `Ctrl + Enter` |
+| **キャンセル** | `Esc` | `Esc` |
 
+## 🛠 開発者向け
+
+### インストール
 ```bash
-$ npm install
+npm install
 ```
 
-### Development
-
+### 開発モード
 ```bash
-$ npm run dev
+npm run dev
 ```
 
-### Build
-
+### ビルド
 ```bash
-# For windows
-$ npm run build:win
+# Mac向け
+npm run build:mac
 
-# For macOS
-$ npm run build:mac
-
-# For Linux
-$ npm run build:linux
+# Windows向け
+npm run build:win
 ```
+
+## 📝 ライセンス
+MIT License
