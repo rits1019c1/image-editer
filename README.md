@@ -51,5 +51,20 @@ npm run build:mac
 npm run build:win
 ```
 
+### 🍎 Mac版の署名トラブルシューティング
+ビルドしたアプリが「壊れているため開けません」またはクラッシュする場合、手動で署名をやり直す必要があります。
+
+#### 1. 証明書の名前を確認
+ターミナルで以下のコマンドを実行し、有効な証明書（`Apple Development: ...`）の名前をコピーします。
+```bash
+security find-identity -v -p codesigning
+```
+
+#### 2. 手動署名の実行
+以下のコマンドの `"..."` 内をコピーした名前に書き換えて実行します。
+```bash
+codesign --force --deep --sign "Apple Development: ri2you1019@gmail.com (63BK3XSLTQ)" dist/mac-arm64/image-editor.app
+```
+
 ## 📝 ライセンス
 MIT License
