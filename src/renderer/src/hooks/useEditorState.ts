@@ -100,7 +100,11 @@ export function useEditorState() {
       swirlCenterY: 0.5,
       swirlRadius: 0.5,
       swirlDirection: 1,
-      swirlRotations: 2
+      swirlRotations: 2,
+      brightness: 0,
+      contrast: 0,
+      saturation: 0,
+      blurRadius: 3
     }
     setState((prev) => {
       const next = cloneState(prev)
@@ -133,7 +137,13 @@ export function useEditorState() {
         italic: false,
         align: 'left',
         visible: true,
-        opacity: 1
+        opacity: 1,
+        strokeColor: '#000000',
+        strokeWidth: 0,
+        shadowColor: '#000000',
+        shadowBlur: 0,
+        shadowOffsetX: 0,
+        shadowOffsetY: 0
       }
       undoStack.current.push(cloneState(prev))
       if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift()

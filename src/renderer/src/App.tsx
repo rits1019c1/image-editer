@@ -95,6 +95,8 @@ export default function App() {
   const [showCanvasSizeDialog, setShowCanvasSizeDialog] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isBgRemoving, setIsBgRemoving] = useState(false)
+  const [showGrid, setShowGrid] = useState(false)
+  const [cropLayerId, setCropLayerId] = useState<string | null>(null)
   // プラットフォーム（Mac/Windows判定）
   const [platform, setPlatform] = useState<string>('darwin')
 
@@ -126,11 +128,16 @@ export default function App() {
         reader.onloadend = () => resolve(reader.result as string)
         reader.readAsDataURL(resultBlob)
       })
-      // bgRemovedSrc に保存、src も更新（渦巻きがONなら useEffect が自動再適用）
+      // 消去済み画像で src ・ originalSrc 両方を上書き（以後のフィルターのベースが消去済み画像になる）
       updateLayer(layerId, {
         bgRemovedSrc: dataUrl,
         src: dataUrl,
-        filterType: imgLayer.filterType === 'swirl' ? 'swirl' : 'none'
+        originalSrc: dataUrl,
+        filterType: imgLayer.filterType === 'swirl' ? 'swirl' : 'none',
+        // 渦巻きが有効ならuseEffectを再トリガーするため微小変化を加える
+        ...(imgLayer.filterType === 'swirl' ? {
+          swirlRotations: Math.round(imgLayer.swirlRotations * 1000 + 0.001) / 1000
+        } : {})
       } as Partial<import('./types').ImageLayer>)
       showToast('✨ 背景を削除しました')
     } catch (e) {
@@ -270,6 +277,31 @@ export default function App() {
     showToast('レイヤーを結合しました')
   }, [state.selectedIds, selectLayers, deleteSelectedLayers, addImageLayer, showToast])
 
+  // ── クロップ処理 ──────────────────────────────────────────
+  const handleCropDone = useCallback(async (layerId: string, cx: number, cy: number, cw: number, ch: number) => {
+    const targetLayer = state.layers.find((l) => l.id === layerId)
+    if (!targetLayer || targetLayer.type !== 'image') return
+    const imgLayer = targetLayer as import('./types').ImageLayer
+    const { applyCropFilter } = await import('./utils/filters')
+    // 現在の見た目（フィルター適用済み）の src からクロップ → 全変更を保持したまま切り抜き
+    const cropped = await applyCropFilter(imgLayer.src, cx, cy, cw, ch, imgLayer.width, imgLayer.height)
+    updateLayer(layerId, {
+      src: cropped,
+      originalSrc: cropped,
+      bgRemovedSrc: undefined,
+      filterType: 'none',
+      brightness: 0,
+      contrast: 0,
+      saturation: 0,
+      width: cw,
+      height: ch,
+      x: targetLayer.x + cx,
+      y: targetLayer.y + cy
+    } as Partial<import('./types').ImageLayer>)
+    setCropLayerId(null)
+    showToast('✂ クロップしました')
+  }, [state.layers, updateLayer, showToast])
+
   // ── キャンバスをクリップボードに書き込み ─────────────────────
   const handleCopyCanvasToClipboard = useCallback(async () => {
     if (!stageRef.current) return
@@ -286,14 +318,16 @@ export default function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      const inInput = tag === 'TEXTAREA' || tag === 'INPUT'
+      const el = e.target as HTMLElement
+      // INPUT/TEXTAREA だけでなく contentEditable な要素も編集中とみなす
+      const inInput = tag === 'TEXTAREA' || tag === 'INPUT' || el.isContentEditable
       const mod = e.metaKey || e.ctrlKey
 
-      if (mod && e.key === 'z' && !e.shiftKey) {
+      if (mod && e.key === 'z' && !e.shiftKey && !inInput) {
         e.preventDefault(); undo(); showToast('↩ 元に戻した')
         return
       }
-      if ((mod && e.shiftKey && e.key === 'z') || (mod && e.key === 'y')) {
+      if (((mod && e.shiftKey && e.key === 'z') || (mod && e.key === 'y')) && !inInput) {
         e.preventDefault(); redo(); showToast('↪ やり直した')
         return
       }
@@ -410,6 +444,14 @@ export default function App() {
           </svg>
         </button>
 
+        {/* グリッド表示トグル */}
+        <button className={`tool-btn icon-only ${showGrid ? 'active' : ''}`} onClick={() => setShowGrid(g => !g)} title="グリッド表示">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+          </svg>
+        </button>
+
         <div className="toolbar-spacer" />
 
         {/* 出力系 */}
@@ -455,6 +497,10 @@ export default function App() {
                 }
               }}
               stageRef={stageRef}
+              showGrid={showGrid}
+              cropLayerId={cropLayerId}
+              onCropDone={handleCropDone}
+              onCropCancel={() => setCropLayerId(null)}
             />
           </div>
           {state.layers.length === 0 && (
@@ -499,6 +545,7 @@ export default function App() {
                 onMergeLayers={handleMergeLayers}
                 onBgRemove={handleBgRemoveLayer}
                 isBgRemoving={isBgRemoving}
+                onStartCrop={(id) => setCropLayerId(id)}
               />
             ) : (
               <LayerPanel

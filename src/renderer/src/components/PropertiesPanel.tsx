@@ -1,15 +1,18 @@
 import React, { useState } from 'react'
 import { AnyLayer, ImageLayer, TextLayer } from '../types'
-import { applySwirlFilter, applyGrayscaleFilter } from '../utils/filters'
+import {
+  applySwirlFilter, applyGrayscaleFilter, applyChromaKeyFilter,
+  applyAdjustFilter, applyBlurFilter, applySharpenFilter, applyDenoiseFilter
+} from '../utils/filters'
 
 interface PropertiesPanelProps {
   layers: AnyLayer[]
   selectedIds: string[]
   onUpdate: (id: string, changes: Partial<AnyLayer>) => void
   onMergeLayers: () => void
-  // App.tsx側の背景消去ハンドラ（ローディング状態も外から管理）
   onBgRemove?: (layerId: string) => void
   isBgRemoving?: boolean
+  onStartCrop?: (layerId: string) => void
 }
 
 const FONT_FAMILIES = [
@@ -40,11 +43,10 @@ function SliderRow({
 }
 
 export default function PropertiesPanel({
-  layers, selectedIds, onUpdate, onMergeLayers, onBgRemove, isBgRemoving
+  layers, selectedIds, onUpdate, onMergeLayers, onBgRemove, isBgRemoving, onStartCrop
 }: PropertiesPanelProps) {
   const [isProcessing, setIsProcessing] = useState(false)
 
-  // 単一選択の場合のみ詳細プロパティを表示
   const layer = selectedIds.length === 1
     ? layers.find((l) => l.id === selectedIds[0]) ?? null
     : null
@@ -93,10 +95,11 @@ export default function PropertiesPanel({
 
   if (!layer) return null
   const update = (changes: Partial<AnyLayer>) => onUpdate(layer.id, changes)
+  // テキストプロパティ変更時は isRichText をリセットして Konvaテキストノードに即座反映
+  const updateText = (changes: Partial<TextLayer>) =>
+    onUpdate(layer.id, { ...changes, isRichText: false, richDataUrl: undefined, htmlContent: undefined } as Partial<AnyLayer>)
 
   // ── フィルターパイプライン管理 ──────────────────────────
-  // 渦巻き/グレースケールの入力ソース:
-  //   bgRemovedSrc があればそれを使う → 渦巻き+背景消去の同時利用が可能
   const imgLayer = layer.type === 'image' ? (layer as ImageLayer) : null
   const baseSourceForFilter = imgLayer?.bgRemovedSrc ?? imgLayer?.originalSrc ?? ''
 
@@ -124,9 +127,51 @@ export default function PropertiesPanel({
   }, [
     imgLayer?.swirlCenterX, imgLayer?.swirlCenterY, imgLayer?.swirlRadius,
     imgLayer?.swirlDirection, imgLayer?.swirlRotations, imgLayer?.filterType,
-    // bgRemovedSrc が変わったときも再適用（背景消去後に渦巻きを再計算）
     imgLayer?.bgRemovedSrc
   ])
+
+  // クロマキー透過が変わったら自動適用
+  React.useEffect(() => {
+    if (!imgLayer || imgLayer.chromaKeyColor === 'none' || !imgLayer.chromaKeyColor) return
+    const timer = setTimeout(async () => {
+      setIsProcessing(true)
+      try {
+        const result = await applyChromaKeyFilter(
+          baseSourceForFilter,
+          imgLayer.chromaKeyColor as 'white' | 'black',
+          imgLayer.chromaKeyTolerance ?? 30
+        )
+        if (imgLayer.src !== result) {
+          update({ src: result } as Partial<ImageLayer>)
+        }
+      } finally {
+        setIsProcessing(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [
+    imgLayer?.chromaKeyColor, imgLayer?.chromaKeyTolerance,
+    imgLayer?.bgRemovedSrc, imgLayer?.originalSrc
+  ])
+
+  // 明るさ・コントラスト・彩度が変わったら自動適用
+  React.useEffect(() => {
+    if (!imgLayer) return
+    const b = imgLayer.brightness ?? 0
+    const c = imgLayer.contrast ?? 0
+    const s = imgLayer.saturation ?? 0
+    if (b === 0 && c === 0 && s === 0) return
+    const timer = setTimeout(async () => {
+      setIsProcessing(true)
+      try {
+        const result = await applyAdjustFilter(baseSourceForFilter, b, c, s)
+        update({ src: result, filterType: 'adjust' } as Partial<ImageLayer>)
+      } finally {
+        setIsProcessing(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [imgLayer?.brightness, imgLayer?.contrast, imgLayer?.saturation])
 
   const handleApplySwirlFilter = () => {
     if (!imgLayer) return
@@ -135,7 +180,6 @@ export default function PropertiesPanel({
 
   const handleDisableSwirlFilter = () => {
     if (!imgLayer) return
-    // 渦巻きをOFF → bgRemovedSrc があればそれを表示、なければ原画
     const displaySrc = imgLayer.bgRemovedSrc ?? imgLayer.originalSrc
     update({ filterType: 'none', src: displaySrc } as Partial<ImageLayer>)
   }
@@ -151,10 +195,46 @@ export default function PropertiesPanel({
     }
   }
 
+  const handleBlurFilter = async () => {
+    if (!imgLayer) return
+    setIsProcessing(true)
+    try {
+      const result = await applyBlurFilter(baseSourceForFilter, imgLayer.blurRadius ?? 3)
+      update({ src: result, filterType: 'blur' } as Partial<ImageLayer>)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handleSharpenFilter = async () => {
+    if (!imgLayer) return
+    setIsProcessing(true)
+    try {
+      const result = await applySharpenFilter(baseSourceForFilter)
+      update({ src: result, filterType: 'sharpen' } as Partial<ImageLayer>)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handleDenoiseFilter = async () => {
+    if (!imgLayer) return
+    setIsProcessing(true)
+    try {
+      const result = await applyDenoiseFilter(baseSourceForFilter)
+      update({ src: result, filterType: 'denoise' } as Partial<ImageLayer>)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
   const handleResetImage = () => {
     if (!imgLayer) return
-    // 完全リセット: bgRemovedSrc も消す
-    update({ src: imgLayer.originalSrc, filterType: 'none', bgRemovedSrc: undefined } as Partial<ImageLayer>)
+    update({
+      src: imgLayer.originalSrc, filterType: 'none',
+      bgRemovedSrc: undefined, chromaKeyColor: 'none',
+      brightness: 0, contrast: 0, saturation: 0
+    } as Partial<ImageLayer>)
   }
 
   const isBusy = isProcessing || !!isBgRemoving
@@ -178,9 +258,9 @@ export default function PropertiesPanel({
         />
       </div>
 
-      {/* 共通: 位置 */}
+      {/* 共通: 位置・サイズ */}
       <div className="prop-section">
-        <label className="prop-label">位置</label>
+        <label className="prop-label">位置 / サイズ</label>
         <div className="prop-grid-2">
           <div className="prop-field">
             <label>X</label>
@@ -194,6 +274,18 @@ export default function PropertiesPanel({
               onChange={(e) => update({ y: parseInt(e.target.value) || 0 })}
               className="prop-input" />
           </div>
+          <div className="prop-field">
+            <label>幅</label>
+            <input type="number" value={Math.round(layer.width)}
+              onChange={(e) => update({ width: Math.max(1, parseInt(e.target.value) || 1) })}
+              className="prop-input" />
+          </div>
+          <div className="prop-field">
+            <label>高さ</label>
+            <input type="number" value={Math.round(layer.height)}
+              onChange={(e) => update({ height: Math.max(1, parseInt(e.target.value) || 1) })}
+              className="prop-input" />
+          </div>
         </div>
       </div>
 
@@ -205,13 +297,13 @@ export default function PropertiesPanel({
             <div className="prop-section">
               <label className="prop-label">テキスト</label>
               <textarea value={tl.text}
-                onChange={(e) => update({ text: e.target.value } as Partial<TextLayer>)}
+                onChange={(e) => updateText({ text: e.target.value })}
                 className="prop-textarea" rows={3} />
             </div>
             <div className="prop-section">
               <label className="prop-label">フォント</label>
               <select value={tl.fontFamily}
-                onChange={(e) => update({ fontFamily: e.target.value } as Partial<TextLayer>)}
+                onChange={(e) => updateText({ fontFamily: e.target.value })}
                 className="prop-select">
                 {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f}</option>)}
               </select>
@@ -220,14 +312,14 @@ export default function PropertiesPanel({
               <label className="prop-label">フォントサイズ</label>
               <SliderRow label="Size" min={8} max={200} step={1}
                 value={tl.fontSize} format={(v) => `${v}px`}
-                onChange={(v) => update({ fontSize: v } as Partial<TextLayer>)}
+                onChange={(v) => updateText({ fontSize: v })}
               />
             </div>
             <div className="prop-section">
               <label className="prop-label">テキスト色</label>
               <div className="prop-row">
                 <input type="color" value={tl.fill}
-                  onChange={(e) => update({ fill: e.target.value } as Partial<TextLayer>)}
+                  onChange={(e) => updateText({ fill: e.target.value })}
                   className="prop-color" />
                 <span className="prop-value" style={{ fontFamily: 'monospace' }}>{tl.fill}</span>
               </div>
@@ -236,13 +328,73 @@ export default function PropertiesPanel({
               <label className="prop-label">スタイル</label>
               <div className="prop-row gap">
                 <button className={`style-btn ${tl.bold ? 'active' : ''}`}
-                  onClick={() => update({ bold: !tl.bold } as Partial<TextLayer>)}>
+                  onClick={() => updateText({ bold: !tl.bold })}>
                   <strong>B</strong>
                 </button>
                 <button className={`style-btn ${tl.italic ? 'active' : ''}`}
-                  onClick={() => update({ italic: !tl.italic } as Partial<TextLayer>)}>
+                  onClick={() => updateText({ italic: !tl.italic })}>
                   <em>I</em>
                 </button>
+              </div>
+            </div>
+
+            {/* アウトライン */}
+            <div className="prop-section">
+              <label className="prop-label">🖊 アウトライン</label>
+              <div className="prop-grid-2" style={{ marginBottom: 8 }}>
+                <div className="prop-field">
+                  <label>色</label>
+                  <input type="color" value={tl.strokeColor}
+                    onChange={(e) => update({ strokeColor: e.target.value } as Partial<TextLayer>)}
+                    className="prop-color" style={{ width: '100%', height: 32 }} />
+                </div>
+                <div className="prop-field">
+                  <label>太さ</label>
+                  <input type="number" min={0} max={20} value={tl.strokeWidth}
+                    onChange={(e) => update({ strokeWidth: parseFloat(e.target.value) || 0 } as Partial<TextLayer>)}
+                    className="prop-input" />
+                </div>
+              </div>
+              <SliderRow label="太さ" min={0} max={20} step={0.5}
+                value={tl.strokeWidth} format={(v) => `${v}px`}
+                onChange={(v) => update({ strokeWidth: v } as Partial<TextLayer>)}
+              />
+            </div>
+
+            {/* 影 */}
+            <div className="prop-section">
+              <label className="prop-label">🌑 テキスト影</label>
+              <div className="prop-grid-2" style={{ marginBottom: 8 }}>
+                <div className="prop-field">
+                  <label>色</label>
+                  <input type="color" value={tl.shadowColor}
+                    onChange={(e) => update({ shadowColor: e.target.value } as Partial<TextLayer>)}
+                    className="prop-color" style={{ width: '100%', height: 32 }} />
+                </div>
+                <div className="prop-field">
+                  <label>ぼかし</label>
+                  <input type="number" min={0} max={50} value={tl.shadowBlur}
+                    onChange={(e) => update({ shadowBlur: parseFloat(e.target.value) || 0 } as Partial<TextLayer>)}
+                    className="prop-input" />
+                </div>
+              </div>
+              <SliderRow label="ぼかし" min={0} max={50} step={1}
+                value={tl.shadowBlur} format={(v) => `${v}px`}
+                onChange={(v) => update({ shadowBlur: v } as Partial<TextLayer>)}
+              />
+              <div className="prop-grid-2">
+                <div className="prop-field">
+                  <label>X オフセット</label>
+                  <input type="number" min={-50} max={50} value={tl.shadowOffsetX}
+                    onChange={(e) => update({ shadowOffsetX: parseInt(e.target.value) || 0 } as Partial<TextLayer>)}
+                    className="prop-input" />
+                </div>
+                <div className="prop-field">
+                  <label>Y オフセット</label>
+                  <input type="number" min={-50} max={50} value={tl.shadowOffsetY}
+                    onChange={(e) => update({ shadowOffsetY: parseInt(e.target.value) || 0 } as Partial<TextLayer>)}
+                    className="prop-input" />
+                </div>
               </div>
             </div>
           </>
@@ -252,7 +404,33 @@ export default function PropertiesPanel({
       {/* ── 画像フィルター設定 ── */}
       {layer.type === 'image' && imgLayer && (
         <>
-          {/* AI背景削除 ── 上に移動して目立たせる */}
+          {/* クロップ */}
+          <div className="prop-section">
+            <label className="prop-label">✂ クロップ / トリミング</label>
+            <button className="filter-btn" onClick={() => onStartCrop?.(layer.id)} disabled={isBusy}
+              style={{ width: '100%', justifyContent: 'center' }}>
+              ✂ クロップモードを開始
+            </button>
+          </div>
+
+          {/* 明るさ・コントラスト・彩度 */}
+          <div className="prop-section">
+            <label className="prop-label">☀ 明るさ / コントラスト / 彩度</label>
+            <SliderRow label="明るさ" min={-100} max={100} step={1}
+              value={imgLayer.brightness ?? 0} format={(v) => `${v > 0 ? '+' : ''}${v}`}
+              onChange={(v) => update({ brightness: v } as Partial<ImageLayer>)}
+            />
+            <SliderRow label="コントラスト" min={-100} max={100} step={1}
+              value={imgLayer.contrast ?? 0} format={(v) => `${v > 0 ? '+' : ''}${v}`}
+              onChange={(v) => update({ contrast: v } as Partial<ImageLayer>)}
+            />
+            <SliderRow label="彩度" min={-100} max={100} step={1}
+              value={imgLayer.saturation ?? 0} format={(v) => `${v > 0 ? '+' : ''}${v}`}
+              onChange={(v) => update({ saturation: v } as Partial<ImageLayer>)}
+            />
+          </div>
+
+          {/* AI背景削除 */}
           <div className="prop-section">
             <label className="prop-label">
               ✨ AI 背景削除
@@ -275,6 +453,32 @@ export default function PropertiesPanel({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* クロマキー透過 */}
+          <div className="prop-section">
+            <label className="prop-label">
+              🔳 簡易背景透過 (白/黒)
+              {imgLayer.chromaKeyColor && imgLayer.chromaKeyColor !== 'none' && (
+                <span className="filter-badge active-badge">✓ {imgLayer.chromaKeyColor === 'white' ? '白' : '黒'}透過</span>
+              )}
+            </label>
+            <div className="filter-btns" style={{ marginBottom: 8 }}>
+              <button className={`filter-btn ${imgLayer.chromaKeyColor === 'white' ? 'ai-btn-done' : ''}`}
+                onClick={() => update({ chromaKeyColor: imgLayer.chromaKeyColor === 'white' ? 'none' : 'white' } as Partial<ImageLayer>)} disabled={isBusy}>
+                ⬜ 白を透過
+              </button>
+              <button className={`filter-btn ${imgLayer.chromaKeyColor === 'black' ? 'ai-btn-done' : ''}`}
+                onClick={() => update({ chromaKeyColor: imgLayer.chromaKeyColor === 'black' ? 'none' : 'black' } as Partial<ImageLayer>)} disabled={isBusy}>
+                ⬛ 黒を透過
+              </button>
+            </div>
+            {imgLayer.chromaKeyColor && imgLayer.chromaKeyColor !== 'none' && (
+              <SliderRow label="透過の強さ" min={0} max={255} step={1}
+                value={imgLayer.chromaKeyTolerance ?? 30} format={(v) => v.toString()}
+                onChange={(v) => update({ chromaKeyTolerance: v } as Partial<ImageLayer>)}
+              />
+            )}
           </div>
 
           {/* 渦巻きパラメータ */}
@@ -335,6 +539,23 @@ export default function PropertiesPanel({
               <button className="filter-btn" onClick={handleGrayscaleFilter} disabled={isBusy}>
                 ⬛ グレースケール
               </button>
+              <button className="filter-btn" onClick={handleBlurFilter} disabled={isBusy}>
+                🌫 ぼかし
+              </button>
+              <button className="filter-btn" onClick={handleSharpenFilter} disabled={isBusy}>
+                🔍 シャープ
+              </button>
+              <button className="filter-btn" onClick={handleDenoiseFilter} disabled={isBusy}>
+                ✨ ノイズ除去
+              </button>
+            </div>
+            {imgLayer.filterType === 'blur' && (
+              <SliderRow label="ぼかし半径" min={1} max={20} step={1}
+                value={imgLayer.blurRadius ?? 3} format={(v) => `${v}px`}
+                onChange={(v) => update({ blurRadius: v } as Partial<ImageLayer>)}
+              />
+            )}
+            <div className="filter-btns" style={{ marginTop: 8 }}>
               <button className="filter-btn reset" onClick={handleResetImage} disabled={isBusy}>
                 ↩ すべて元に戻す
               </button>
