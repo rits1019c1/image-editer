@@ -63,7 +63,7 @@ security find-identity -v -p codesigning
 #### 2. 手動署名の実行
 以下のコマンドの `"..."` 内をコピーした名前に書き換えて実行します。
 ```bash
-codesign --force --deep --sign "Apple Development: ri2you1019@gmail.com (63BK3XSLTQ)" dist/mac-arm64/image-editor.app
+codesign --force --deep --sign "" dist/mac-arm64/image-editor.app
 ```
 
 ## 📝 ライセンス
